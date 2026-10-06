@@ -15,7 +15,6 @@ def priprav_data_s_osnovou(df, row_cols, agg_dict, ma_service_fee=True):
     if df is None or df.empty:
         return pd.DataFrame(), []
         
-    # Ověření, zda sloupce existují v dataframe
     missing_cols = [col for col in row_cols if col not in df.columns]
     for col in agg_dict.keys():
         if col not in df.columns and col not in missing_cols:
@@ -56,7 +55,7 @@ def priprav_data_s_osnovou(df, row_cols, agg_dict, ma_service_fee=True):
             if ma_service_fee and "Service fee" in subtotal_row: zaznam_subtotal["Průměr z Service fee2"] = subtotal_row["Průměr z Service fee2"]
             if "Provize" in subtotal_row: zaznam_subtotal["Průměr z Provize2"] = subtotal_row["Průměr z Provize2"]
             vysledne_radky.append(zaznam_subtotal)
-            levels.append(1) # Hlavní řádek (úroveň 1 - nadřazený součet)
+            levels.append(1) # Hlavní řádek (úroveň 1)
             
             detaily = df_grouped[df_grouped[row_cols[0]] == skupina_nazev]
             for _, detail_row in detaily.iterrows():
@@ -65,7 +64,7 @@ def priprav_data_s_osnovou(df, row_cols, agg_dict, ma_service_fee=True):
                 if ma_service_fee and "Service fee" in detail_row: zaznam_detail["Průměr z Service fee2"] = detail_row["Průměr z Service fee2"]
                 if "Provize" in detail_row: zaznam_detail["Průměr z Provize2"] = detail_row["Průměr z Provize2"]
                 vysledne_radky.append(zaznam_detail)
-                levels.append(2) # Podřízený detail (úroveň 2 - schovatelný pod úroveň 1)
+                levels.append(2) # Podřízený detail (úroveň 2)
 
     celkem_dict = df.agg(agg_dict).to_dict()
     celkem_row = {"Popisky řádků": "Celkový součet"}
@@ -130,11 +129,10 @@ if heslo == "TajneHeslo2026":
     if uploaded_file is not None:
         df = pd.read_excel(uploaded_file)
         
-        # Bezpečné filtrování pro BTT (podpora pro různé zápisy jako "BTT", "btt" atd., nebo fallback na celá data)
         if "Název org." in df.columns:
             df_btt = df[df["Název org."].astype(str).str.contains("BTT", case=False, na=False)]
             if df_btt.empty:
-                df_btt = df # Pokud by nebylo nalezeno přesně "BTT", vezmeme plná data, aby tabulka nebyla prázdná
+                df_btt = df
         else:
             df_btt = df
             
@@ -176,7 +174,6 @@ if heslo == "TajneHeslo2026":
                 df_t6, l_t6 = priprav_data_s_osnovou(df_helpdesk, ["Název org."], agg_with_service, ma_service_fee=False)
                 tabulky_def.append({"nadpis": "6. HELPDESK", "filtry": [], "df": df_t6, "levels": l_t6})
                 
-                # Klienti BTT: Hierarchická tabulka Název org. -> Služba
                 df_t7, l_t7 = priprav_data_s_osnovou(df_btt, ["Název org.", "Služba"], agg_full)
                 tabulky_def.append({"nadpis": "7. KLIENTI BTT", "filtry": [("Jméno referenta", "(Vše)")], "df": df_t7, "levels": l_t7})
 
@@ -190,54 +187,15 @@ if heslo == "TajneHeslo2026":
             else:
                 st.info("Tabulka neobsahuje data pro zobrazení.")
 
-        # Generování Excelu s ochranou proti pádům
+        # Generování Excelu
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             wb = writer.book
             ws = wb.add_worksheet('Výsledky BTT')
             writer.sheets['Výsledky BTT'] = ws
             
-            # Zapnutí viditelnosti tlačítek osnovy (+/-) vlevo v Excelu
+            # Zapnutí viditelnosti tlačítek osnovy (+/-) v Excelu
             ws.outline_settings(visible=True)
             
             f_bold = wb.add_format({'bold': True})
-            f_hdr = wb.add_format({'bold': True, 'bottom': 1, 'bg_color': '#D9D9D9'})
-            f_num = wb.add_format({'num_format': '#,##0.00'})
-            f_int = wb.add_format({'num_format': '#,##0'})
-            
-            ws.set_column('A:A', 35)
-            ws.set_column('B:G', 15)
-            
-            r_idx = 0
-            for t in tabulky_def:
-                for f_name, f_val in t["filtry"]:
-                    ws.write(r_idx, 0, f_name, f_bold)
-                    ws.write(r_idx, 1, f_val)
-                    r_idx += 1
-                if t["filtry"]: r_idx += 1
-                
-                df_export = t["df"]
-                levels = t.get("levels", [])
-                
-                if not df_export.empty:
-                    for c_idx, c_name in enumerate(df_export.columns):
-                        ws.write(r_idx, c_idx, c_name, f_hdr)
-                    r_idx += 1
-                    
-                    for i, (_, r_data) in enumerate(df_export.iterrows()):
-                        current_level = levels[i] if i < len(levels) else 0
-                        
-                        # Nastavení osnovy řádku
-                        if current_level == 1:
-                            ws.set_row(r_idx, 18, None, {'level': 1})
-                        elif current_level == 2:
-                            ws.set_row(r_idx, 18, None, {'level': 2})
-                        else:
-                            ws.set_row(r_idx, 18)
-                        
-                        for c_idx, c_name in enumerate(df_export.columns):
-                            val = r_data[c_name]
-                            if pd.isna(val) or val == "":
-                                ws.write(r_idx, c_idx, "")
-                            elif "Popisky řádků" in c_name:
-                                if not str(val).startswith("   ") or "Celkový součet
+            f_hdr = wb.add_format({'bold': True, '
