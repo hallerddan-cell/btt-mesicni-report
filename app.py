@@ -237,4 +237,15 @@ if heslo == "TajneHeslo2026":
         with col2:
             st.subheader("📧 Odeslání přes Outlook 365")
             prijemci = st.text_input("Příjemci (oddělené čárkou)", "email1@firma.cz, email2@firma.cz")
-            poznamka_mail = st.text_area("Volitelná zpráva v e-mailu", "
+            poznamka_mail = st.text_area("Volitelná zpráva v e-mailu", "Zde je měsíční přehled výsledků BTT s rozbalovacími strukturami.")
+            
+            if st.button("Odeslat report e-mailem"):
+                with st.spinner("Odesílám e-mail přes Outlook..."):
+                    success, message = odeslat_email_outlook(excel_data, file_name_out, prijemci, poznamka_mail)
+                    if success:
+                        st.success(message)
+                    else:
+                        st.error(message)
+
+elif heslo:
+    st.error("Nesprávné heslo.")
