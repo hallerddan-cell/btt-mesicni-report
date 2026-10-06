@@ -32,7 +32,7 @@ def priprav_data_s_osnovou(df, row_cols, agg_dict, ma_service_fee=True):
             if ma_service_fee and "Service fee" in row: zaznam["Průměr z Service fee2"] = row["Průměr z Service fee2"]
             if "Provize" in row: zaznam["Průměr z Provize2"] = row["Průměr z Provize2"]
             vysledne_radky.append(zaznam)
-            levels.append(0) # Jednoúrovňová tabulka nemá osnovu
+            levels.append(0)
             
     elif len(row_cols) == 2:
         hlavni_skupiny = df.groupby(row_cols[0]).agg(agg_dict).reset_index()
@@ -48,7 +48,7 @@ def priprav_data_s_osnovou(df, row_cols, agg_dict, ma_service_fee=True):
             if ma_service_fee and "Service fee" in subtotal_row: zaznam_subtotal["Průměr z Service fee2"] = subtotal_row["Průměr z Service fee2"]
             if "Provize" in subtotal_row: zaznam_subtotal["Průměr z Provize2"] = subtotal_row["Průměr z Provize2"]
             vysledne_radky.append(zaznam_subtotal)
-            levels.append(1) # Hlavní řádek (nadřazená úroveň)
+            levels.append(1) # Hlavní řádek (úroveň 1)
             
             detaily = df_grouped[df_grouped[row_cols[0]] == skupina_nazev]
             for _, detail_row in detaily.iterrows():
@@ -57,7 +57,7 @@ def priprav_data_s_osnovou(df, row_cols, agg_dict, ma_service_fee=True):
                 if ma_service_fee and "Service fee" in detail_row: zaznam_detail["Průměr z Service fee2"] = detail_row["Průměr z Service fee2"]
                 if "Provize" in detail_row: zaznam_detail["Průměr z Provize2"] = detail_row["Průměr z Provize2"]
                 vysledne_radky.append(zaznam_detail)
-                levels.append(2) # Podřízený řádek (schovatelný pod úroveň 1)
+                levels.append(2) # Podřízený detail (úroveň 2)
 
     celkem_dict = df.agg(agg_dict).to_dict()
     celkem_row = {"Popisky řádků": "Celkový součet"}
@@ -69,7 +69,7 @@ def priprav_data_s_osnovou(df, row_cols, agg_dict, ma_service_fee=True):
         celkem_row["Průměr z Provize2"] = celkem_dict["Provize"] / celkem_dict["Poč.dokl."] if celkem_dict["Poč.dokl."] > 0 else 0
         
     vysledne_radky.append(celkem_row)
-    levels.append(0) # Celkový součet mimo osnovu
+    levels.append(0)
     
     return pd.DataFrame(vysledne_radky), levels
 
@@ -175,7 +175,7 @@ if heslo == "TajneHeslo2026":
             ws = wb.add_worksheet('Výsledky BTT')
             writer.sheets['Výsledky BTT'] = ws
             
-            # Zapnutí viditelnosti tlačítek osnovy (+/-) v Excelu
+            # Povolení tlačítek osnovy (+/-) v Excelu
             ws.outline_settings(visible=True)
             
             f_bold = wb.add_format({'bold': True})
@@ -201,59 +201,3 @@ if heslo == "TajneHeslo2026":
                     for c_idx, c_name in enumerate(df_export.columns):
                         ws.write(r_idx, c_idx, c_name, f_hdr)
                     r_idx += 1
-                    
-                    for i, (_, r_data) in enumerate(df_export.iterrows()):
-                        current_level = levels[i] if i < len(levels) else 0
-                        
-                        # Nastavení úrovně pro osnovu řádku
-                        if current_level == 1:
-                            ws.set_row(r_idx, None, None, {'level': 1})
-                        elif current_level == 2:
-                            ws.set_row(r_idx, None, None, {'level': 2})
-                        
-                        for c_idx, c_name in enumerate(df_export.columns):
-                            val = r_data[c_name]
-                            if pd.isna(val) or val == "":
-                                ws.write(r_idx, c_idx, "")
-                            elif "Popisky řádků" in c_name:
-                                if not str(val).startswith("   ") or "Celkový součet" in str(val):
-                                    ws.write(r_idx, c_idx, str(val), f_bold)
-                                else:
-                                    ws.write(r_idx, c_idx, str(val))
-                            elif "Poč.dokl." in c_name:
-                                ws.write_number(r_idx, c_idx, val, f_int)
-                            else:
-                                ws.write_number(r_idx, c_idx, val, f_num)
-                        r_idx += 1
-                r_idx += 3
-
-        excel_data = output.getvalue()
-        file_name_out = "Vysledky_BTT_srpen_2026.xlsx"
-
-        st.divider()
-        
-        col1, ch2 = st.columns(2)
-        with col1:
-            st.subheader("📥 Stažení souboru")
-            st.download_button(
-                label="Stáhnout výkaz do PC",
-                data=excel_data,
-                file_name=file_name_out,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            
-        with ch2:
-            st.subheader("📧 Odeslání přes Outlook 365")
-            prijemci = st.text_input("Příjemci (oddělené čárkou)", "email1@firma.cz, email2@firma.cz")
-            poznamka_mail = st.text_area("Volitelná zpráva v e-mailu", "Zde je měsíční přehled výsledků BTT s rozbalovacími strukturami.")
-            
-            if st.button("Odeslat report e-mailem"):
-                with st.spinner("Odesílám e-mail přes Outlook..."):
-                    success, message = odeslat_email_outlook(excel_data, file_name_out, prijemci, poznamka_mail)
-                    if success:
-                        st.success(message)
-                    else:
-                        st.error(message)
-
-elif heslo:
-    st.error("Nesprávné heslo.")
