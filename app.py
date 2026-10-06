@@ -32,7 +32,7 @@ def priprav_data_s_osnovou(df, row_cols, agg_dict, ma_service_fee=True):
             if ma_service_fee and "Service fee" in row: zaznam["Průměr z Service fee2"] = row["Průměr z Service fee2"]
             if "Provize" in row: zaznam["Průměr z Provize2"] = row["Průměr z Provize2"]
             vysledne_radky.append(zaznam)
-            levels.append(1)
+            levels.append(0) # Jednoúrovňová tabulka nemá osnovu
             
     elif len(row_cols) == 2:
         hlavni_skupiny = df.groupby(row_cols[0]).agg(agg_dict).reset_index()
@@ -48,7 +48,7 @@ def priprav_data_s_osnovou(df, row_cols, agg_dict, ma_service_fee=True):
             if ma_service_fee and "Service fee" in subtotal_row: zaznam_subtotal["Průměr z Service fee2"] = subtotal_row["Průměr z Service fee2"]
             if "Provize" in subtotal_row: zaznam_subtotal["Průměr z Provize2"] = subtotal_row["Průměr z Provize2"]
             vysledne_radky.append(zaznam_subtotal)
-            levels.append(1) # Hlavní řádek (úroveň 1)
+            levels.append(1) # Hlavní řádek (nadřazená úroveň)
             
             detaily = df_grouped[df_grouped[row_cols[0]] == skupina_nazev]
             for _, detail_row in detaily.iterrows():
@@ -57,7 +57,7 @@ def priprav_data_s_osnovou(df, row_cols, agg_dict, ma_service_fee=True):
                 if ma_service_fee and "Service fee" in detail_row: zaznam_detail["Průměr z Service fee2"] = detail_row["Průměr z Service fee2"]
                 if "Provize" in detail_row: zaznam_detail["Průměr z Provize2"] = detail_row["Průměr z Provize2"]
                 vysledne_radky.append(zaznam_detail)
-                levels.append(2) # Podřízený řádek (úroveň 2 - schovatelný)
+                levels.append(2) # Podřízený řádek (schovatelný pod úroveň 1)
 
     celkem_dict = df.agg(agg_dict).to_dict()
     celkem_row = {"Popisky řádků": "Celkový součet"}
@@ -69,7 +69,7 @@ def priprav_data_s_osnovou(df, row_cols, agg_dict, ma_service_fee=True):
         celkem_row["Průměr z Provize2"] = celkem_dict["Provize"] / celkem_dict["Poč.dokl."] if celkem_dict["Poč.dokl."] > 0 else 0
         
     vysledne_radky.append(celkem_row)
-    levels.append(0)
+    levels.append(0) # Celkový součet mimo osnovu
     
     return pd.DataFrame(vysledne_radky), levels
 
@@ -175,6 +175,9 @@ if heslo == "TajneHeslo2026":
             ws = wb.add_worksheet('Výsledky BTT')
             writer.sheets['Výsledky BTT'] = ws
             
+            # Zapnutí viditelnosti tlačítek osnovy (+/-) v Excelu
+            ws.outline_settings(visible=True)
+            
             f_bold = wb.add_format({'bold': True})
             f_hdr = wb.add_format({'bold': True, 'bottom': 1, 'bg_color': '#D9D9D9'})
             f_num = wb.add_format({'num_format': '#,##0.00'})
@@ -202,9 +205,11 @@ if heslo == "TajneHeslo2026":
                     for i, (_, r_data) in enumerate(df_export.iterrows()):
                         current_level = levels[i] if i < len(levels) else 0
                         
-                        # Nastavení osnovy (collapse/expand level) pro řádek přes set_row
-                        if current_level == 2:
+                        # Nastavení úrovně pro osnovu řádku
+                        if current_level == 1:
                             ws.set_row(r_idx, None, None, {'level': 1})
+                        elif current_level == 2:
+                            ws.set_row(r_idx, None, None, {'level': 2})
                         
                         for c_idx, c_name in enumerate(df_export.columns):
                             val = r_data[c_name]
@@ -227,7 +232,7 @@ if heslo == "TajneHeslo2026":
 
         st.divider()
         
-        col1, col2 = st.columns(2)
+        col1, ch2 = st.columns(2)
         with col1:
             st.subheader("📥 Stažení souboru")
             st.download_button(
@@ -237,7 +242,7 @@ if heslo == "TajneHeslo2026":
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
             
-        with col2:
+        with ch2:
             st.subheader("📧 Odeslání přes Outlook 365")
             prijemci = st.text_input("Příjemci (oddělené čárkou)", "email1@firma.cz, email2@firma.cz")
             poznamka_mail = st.text_area("Volitelná zpráva v e-mailu", "Zde je měsíční přehled výsledků BTT s rozbalovacími strukturami.")
