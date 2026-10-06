@@ -96,4 +96,4 @@ if heslo == "TajneHeslo2026":
             st.error("Nahranému souboru chybí některé z požadovaných sloupců: Služba, Poč.dokl., Celkem, Provize.")
 elif heslo:
     st.sidebar.error("Nesprávné heslo.")
-Jak kód na GitHubu aktualizovat:
+
