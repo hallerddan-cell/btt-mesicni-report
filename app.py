@@ -23,7 +23,7 @@ def priprav_data_s_osnovou(df, row_cols, agg_dict, ma_service_fee=True):
         df_grouped["Průměr z Provize2"] = np.where(df_grouped["Poč.dokl."] > 0, df_grouped["Provize"] / df_grouped["Poč.dokl."], 0)
 
     vysledne_radky = []
-    levels = [] # Sleduje úroveň osnovy pro Excel (1 = nadřazený součet, 2 = detailní podřízený řádek)
+    levels = [] 
     
     if len(row_cols) == 1:
         for _, row in df_grouped.iterrows():
@@ -48,7 +48,7 @@ def priprav_data_s_osnovou(df, row_cols, agg_dict, ma_service_fee=True):
             if ma_service_fee and "Service fee" in subtotal_row: zaznam_subtotal["Průměr z Service fee2"] = subtotal_row["Průměr z Service fee2"]
             if "Provize" in subtotal_row: zaznam_subtotal["Průměr z Provize2"] = subtotal_row["Průměr z Provize2"]
             vysledne_radky.append(zaznam_subtotal)
-            levels.append(1) # Hlavní úroveň (zabalitelná)
+            levels.append(1)
             
             detaily = df_grouped[df_grouped[row_cols[0]] == skupina_nazev]
             for _, detail_row in detaily.iterrows():
@@ -57,7 +57,7 @@ def priprav_data_s_osnovou(df, row_cols, agg_dict, ma_service_fee=True):
                 if ma_service_fee and "Service fee" in detail_row: zaznam_detail["Průměr z Service fee2"] = detail_row["Průměr z Service fee2"]
                 if "Provize" in detail_row: zaznam_detail["Průměr z Provize2"] = detail_row["Průměr z Provize2"]
                 vysledne_radky.append(zaznam_detail)
-                levels.append(2) # Podřízená úroveň (skrytelná pod úroveň 1)
+                levels.append(2)
 
     celkem_dict = df.agg(agg_dict).to_dict()
     celkem_row = {"Popisky řádků": "Celkový součet"}
@@ -69,7 +69,7 @@ def priprav_data_s_osnovou(df, row_cols, agg_dict, ma_service_fee=True):
         celkem_row["Průměr z Provize2"] = celkem_dict["Provize"] / celkem_dict["Poč.dokl."] if celkem_dict["Poč.dokl."] > 0 else 0
         
     vysledne_radky.append(celkem_row)
-    levels.append(0) # Celkový součet nepodléhá osnově
+    levels.append(0)
     
     return pd.DataFrame(vysledne_radky), levels
 
@@ -138,44 +138,37 @@ if heslo == "TajneHeslo2026":
         
         tabulky_def = []
         if "Služba" in df.columns:
-            # 1. Srpen
             df_t1, l_t1 = priprav_data_s_osnovou(df, ["Služba"], agg_with_provize, ma_service_fee=False)
             tabulky_def.append({"nadpis": "1. SRPEN 2026", "filtry": [], "df": df_t1, "levels": l_t1})
             
-            # 2. BTT
             df_t2, l_t2 = priprav_data_s_osnovou(df_btt, ["Služba"], agg_full)
             tabulky_def.append({"nadpis": "2. BTT", "filtry": [("Název org.", "(Vše)"), ("Jméno referenta", "(Vše)")], "df": df_t2, "levels": l_t2})
             
             if "Jméno referenta" in df.columns:
-                # 3. Referenti (Hierarchie s rozbalením)
                 df_t3, l_t3 = priprav_data_s_osnovou(df, ["Jméno referenta", "Služba"], agg_full)
                 tabulky_def.append({"nadpis": "3. REFERENTI", "filtry": [("Název org.", "(Vše)")], "df": df_t3, "levels": l_t3})
                 
-                # 5. Obchoďáci
                 df_t5, l_t5 = priprav_data_s_osnovou(df_obchodaci, ["Jméno referenta"], agg_with_provize, ma_service_fee=False)
                 tabulky_def.append({"nadpis": "5. OBCHOĎÁCI", "filtry": [], "df": df_t5, "levels": l_t5})
                 
             if "Název org." in df.columns:
-                # 4. Konsolidátoři
                 df_t4, l_t4 = priprav_data_s_osnovou(df, ["Název org."], agg_full)
                 tabulky_def.insert(3, {"nadpis": "4. KONSOLIDÁTOŘI", "filtry": [], "df": df_t4, "levels": l_t4})
                 
-                # 6. Helpdesk
                 df_t6, l_t6 = priprav_data_s_osnovou(df_helpdesk, ["Název org."], agg_with_service, ma_service_fee=False)
                 tabulky_def.append({"nadpis": "6. HELPDESK", "filtry": [], "df": df_t6, "levels": l_t6})
                 
-                # 7. Klienti BTT (Hierarchie s rozbalením)
                 df_t7, l_t7 = priprav_data_s_osnovou(df_btt, ["Název org.", "Služba"], agg_full)
                 tabulky_def.append({"nadpis": "7. KLIENTI BTT", "filtry": [("Jméno referenta", "(Vše)")], "df": df_t7, "levels": l_t7})
 
-        st.success("Data byla úspěšně zpracována včetně rozbalovacích struktur.")
+        st.success("Data byla úspěšně zpracována.")
         
         for t in tabulky_def:
             st.subheader(t["nadpis"])
             for f_name, f_val in t["filtry"]: st.caption(f"_{f_name}: {f_val}_")
             if not t["df"].empty: st.dataframe(t["df"], use_container_width=True)
 
-        # Generování Excelu s nativními Excelovými osnovami (skupinami řádků pro rozbalování)
+        # Generování Excelu
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             wb = writer.book
@@ -206,11 +199,8 @@ if heslo == "TajneHeslo2026":
                         ws.write(r_idx, c_idx, c_name, f_hdr)
                     r_idx += 1
                     
-                    # Zápis řádků a nastavení úrovně osnovy (collapse/expand)
                     for i, (_, r_data) in enumerate(df_export.iterrows()):
                         current_level = levels[i] if i < len(levels) else 0
-                        
-                        # Pokud má řádek úroveň podsestavy (2), nastavíme mu group level v Excelu
                         row_options = {'level': 1} if current_level == 2 else {}
                         
                         for c_idx, c_name in enumerate(df_export.columns):
@@ -219,13 +209,13 @@ if heslo == "TajneHeslo2026":
                                 ws.write(r_idx, c_idx, "", row_options)
                             elif "Popisky řádků" in c_name:
                                 if not str(val).startswith("   ") or "Celkový součet" in str(val):
-                                    ws.write(r_idx, c_idx, str(val), f_bold, row_options)
+                                    ws.write(r_idx, c_idx, str(val), f_bold, **row_options)
                                 else:
-                                    ws.write(r_idx, c_idx, str(val), row_options)
+                                    ws.write(r_idx, c_idx, str(val), **row_options)
                             elif "Poč.dokl." in c_name:
-                                ws.write_number(r_idx, c_idx, val, f_int, row_options)
+                                ws.write_number(r_idx, c_idx, val, f_int, **row_options)
                             else:
-                                ws.write_number(r_idx, c_idx, val, f_num, row_options)
+                                ws.write_number(r_idx, c_idx, val, f_num, **row_options)
                         r_idx += 1
                 r_idx += 3
 
@@ -247,15 +237,4 @@ if heslo == "TajneHeslo2026":
         with col2:
             st.subheader("📧 Odeslání přes Outlook 365")
             prijemci = st.text_input("Příjemci (oddělené čárkou)", "email1@firma.cz, email2@firma.cz")
-            poznamka_mail = st.text_area("Volitelná zpráva v e-mailu", "Zde je měsíční přehled výsledků BTT s rozbalovacími strukturami.")
-            
-            if st.button("Odeslat report e-mailem"):
-                with st.spinner("Odesílám e-mail přes Outlook..."):
-                    success, message = odeslat_email_outlook(excel_data, file_name_out, prijemci, poznamka_mail)
-                    if success:
-                        st.success(message)
-                    else:
-                        st.error(message)
-
-elif heslo:
-    st.error("Nesprávné heslo.")
+            poznamka_mail = st.text_area("Volitelná zpráva v e-mailu", "
