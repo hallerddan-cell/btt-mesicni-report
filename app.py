@@ -2,15 +2,19 @@ import streamlit as st
 import pandas as pd
 import io
 import numpy as np
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email.mime.text import MIMEText
+from email import encoders
 
 st.set_page_config(page_title="BTT Měsíční Reporty", layout="wide")
 
-# --- POMOCNÁ FUNKCE PRO TVORBU KONTINGENČNÍ TABULKY ---
-def vytvor_kontingencni_tabulku(df, row_cols, agg_dict, ma_service_fee=True):
+# --- POMOCNÁ FUNKCE PRO STRUKTURU S ÚROVNĚMI PRO EXCELOVÉ OSNOVY ---
+def priprav_data_s_osnovou(df, row_cols, agg_dict, ma_service_fee=True):
     if df.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(), []
         
-    # Agregace dat
     df_grouped = df.groupby(row_cols).agg(agg_dict).reset_index()
     
     if "Service fee" in df_grouped.columns and ma_service_fee:
@@ -19,6 +23,7 @@ def vytvor_kontingencni_tabulku(df, row_cols, agg_dict, ma_service_fee=True):
         df_grouped["Průměr z Provize2"] = np.where(df_grouped["Poč.dokl."] > 0, df_grouped["Provize"] / df_grouped["Poč.dokl."], 0)
 
     vysledne_radky = []
+    levels = [] # Sleduje úroveň osnovy pro Excel (1 = nadřazený součet, 2 = detailní podřízený řádek)
     
     if len(row_cols) == 1:
         for _, row in df_grouped.iterrows():
@@ -27,6 +32,7 @@ def vytvor_kontingencni_tabulku(df, row_cols, agg_dict, ma_service_fee=True):
             if ma_service_fee and "Service fee" in row: zaznam["Průměr z Service fee2"] = row["Průměr z Service fee2"]
             if "Provize" in row: zaznam["Průměr z Provize2"] = row["Průměr z Provize2"]
             vysledne_radky.append(zaznam)
+            levels.append(1)
             
     elif len(row_cols) == 2:
         hlavni_skupiny = df.groupby(row_cols[0]).agg(agg_dict).reset_index()
@@ -42,6 +48,7 @@ def vytvor_kontingencni_tabulku(df, row_cols, agg_dict, ma_service_fee=True):
             if ma_service_fee and "Service fee" in subtotal_row: zaznam_subtotal["Průměr z Service fee2"] = subtotal_row["Průměr z Service fee2"]
             if "Provize" in subtotal_row: zaznam_subtotal["Průměr z Provize2"] = subtotal_row["Průměr z Provize2"]
             vysledne_radky.append(zaznam_subtotal)
+            levels.append(1) # Hlavní úroveň (zabalitelná)
             
             detaily = df_grouped[df_grouped[row_cols[0]] == skupina_nazev]
             for _, detail_row in detaily.iterrows():
@@ -50,6 +57,7 @@ def vytvor_kontingencni_tabulku(df, row_cols, agg_dict, ma_service_fee=True):
                 if ma_service_fee and "Service fee" in detail_row: zaznam_detail["Průměr z Service fee2"] = detail_row["Průměr z Service fee2"]
                 if "Provize" in detail_row: zaznam_detail["Průměr z Provize2"] = detail_row["Průměr z Provize2"]
                 vysledne_radky.append(zaznam_detail)
+                levels.append(2) # Podřízená úroveň (skrytelná pod úroveň 1)
 
     celkem_dict = df.agg(agg_dict).to_dict()
     celkem_row = {"Popisky řádků": "Celkový součet"}
@@ -61,63 +69,113 @@ def vytvor_kontingencni_tabulku(df, row_cols, agg_dict, ma_service_fee=True):
         celkem_row["Průměr z Provize2"] = celkem_dict["Provize"] / celkem_dict["Poč.dokl."] if celkem_dict["Poč.dokl."] > 0 else 0
         
     vysledne_radky.append(celkem_row)
+    levels.append(0) # Celkový součet nepodléhá osnově
     
-    return pd.DataFrame(vysledne_radky)
+    return pd.DataFrame(vysledne_radky), levels
+
+
+# --- FUNKCE PRO ODESLÁNÍ E-MAILU ---
+def odeslat_email_outlook(file_bytes, filename, recipients_str, poznamka):
+    try:
+        sender_email = st.secrets["smtp"]["sender_email"]
+        sender_password = st.secrets["smtp"]["password"]
+    except Exception:
+        return False, "Chybí nastavení SMTP v Secrets (sender_email a password)."
+
+    recipients = [r.strip() for r in recipients_str.split(",") if r.strip()]
+    if not recipients:
+        return False, "Zadejte alespoň jednu platnou e-mailovou adresu."
+
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = ", ".join(recipients)
+    msg['Subject'] = "BTT Měsíční Výkaz - Automatický report"
+
+    body = f"Dobrý den,\n\nV příloze zasílám vygenerovaný měsíční výkaz BTT s nastavenými osnovami (rozbalovací struktura).\n\nPoznámka:\n{poznamka}"
+    msg.attach(MIMEText(body, 'plain', 'utf-8'))
+
+    part = MIMEBase('application', 'vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    part.set_payload(file_bytes)
+    encoders.encode_base64(part)
+    part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
+    msg.attach(part)
+
+    try:
+        server = smtplib.SMTP('smtp.office365.com', 587)
+        server.starttls()
+        server.login(sender_email, sender_password)
+        server.sendmail(sender_email, recipients, msg.as_string())
+        server.quit()
+        return True, "E-mail byl úspěšně odeslán."
+    except Exception as e:
+        return False, f"Chyba při odesílání: {str(e)}"
 
 
 # --- HLAVNÍ APLIKACE ---
 heslo = st.sidebar.text_input("Zadejte heslo", type="password")
 
 if heslo == "TajneHeslo2026":
-    st.title("📊 BTT Měsíční Výkaz (Přesná kopie Excelu)")
+    st.title("📊 BTT Měsíční Výkaz (Kontingenční tabulky s rozbalením)")
     
     uploaded_file = st.file_uploader("Nahrajte zdrojová data (.xlsx)", type=["xlsx"])
     
     if uploaded_file is not None:
         df = pd.read_excel(uploaded_file)
         
-        # Ošetření filtrů 
         df_btt = df[df["Název org."].astype(str).str.contains("BTT", na=False)] if "Název org." in df.columns else df
         df_helpdesk = df[df["Služba"].astype(str).str.contains("Helpdesk", case=False, na=False)] if "Služba" in df.columns else df
         
-        # Filtrování obchodníků podle jmen z Vašeho excelu (Můžete přidat/ubrat další lidi sem)
         obchodaci = ['Jandošová Petra', 'Matějková Ivona', 'Nekola Tomáš', 'Třebický Tomáš']
         if "Jméno referenta" in df.columns:
             df_obchodaci = df[df["Jméno referenta"].isin(obchodaci)]
         else:
-            df_obchodaci = df # Fallback
+            df_obchodaci = df
 
-        # Agregace
         base_agg = {"Poč.dokl.": "sum", "Celkem": "sum"}
         agg_with_provize = {**base_agg, "Provize": "sum"}
         agg_with_service = {**base_agg, "Service fee": "sum"}
         agg_full = {**base_agg, "Service fee": "sum", "Provize": "sum"}
         
-        # Definice 7 tabulek
         tabulky_def = []
         if "Služba" in df.columns:
-            tabulky_def.append({"nadpis": "1. SRPEN 2026", "filtry": [], "df": vytvor_kontingencni_tabulku(df, ["Služba"], agg_with_provize, ma_service_fee=False)})
-            tabulky_def.append({"nadpis": "2. BTT", "filtry": [("Název org.", "(Vše)"), ("Jméno referenta", "(Vše)")], "df": vytvor_kontingencni_tabulku(df_btt, ["Služba"], agg_full)})
+            # 1. Srpen
+            df_t1, l_t1 = priprav_data_s_osnovou(df, ["Služba"], agg_with_provize, ma_service_fee=False)
+            tabulky_def.append({"nadpis": "1. SRPEN 2026", "filtry": [], "df": df_t1, "levels": l_t1})
+            
+            # 2. BTT
+            df_t2, l_t2 = priprav_data_s_osnovou(df_btt, ["Služba"], agg_full)
+            tabulky_def.append({"nadpis": "2. BTT", "filtry": [("Název org.", "(Vše)"), ("Jméno referenta", "(Vše)")], "df": df_t2, "levels": l_t2})
             
             if "Jméno referenta" in df.columns:
-                tabulky_def.append({"nadpis": "3. REFERENTI", "filtry": [("Název org.", "(Vše)")], "df": vytvor_kontingencni_tabulku(df, ["Jméno referenta", "Služba"], agg_full)})
-                # OPRAVA TÉTO TABULKY -> POUŽIJEME 'Jméno referenta' ale pouze pro vyfiltrované obchodníky
-                tabulky_def.append({"nadpis": "5. OBCHOĎÁCI", "filtry": [], "df": vytvor_kontingencni_tabulku(df_obchodaci, ["Jméno referenta"], agg_with_provize, ma_service_fee=False)})
+                # 3. Referenti (Hierarchie s rozbalením)
+                df_t3, l_t3 = priprav_data_s_osnovou(df, ["Jméno referenta", "Služba"], agg_full)
+                tabulky_def.append({"nadpis": "3. REFERENTI", "filtry": [("Název org.", "(Vše)")], "df": df_t3, "levels": l_t3})
+                
+                # 5. Obchoďáci
+                df_t5, l_t5 = priprav_data_s_osnovou(df_obchodaci, ["Jméno referenta"], agg_with_provize, ma_service_fee=False)
+                tabulky_def.append({"nadpis": "5. OBCHOĎÁCI", "filtry": [], "df": df_t5, "levels": l_t5})
                 
             if "Název org." in df.columns:
-                tabulky_def.insert(3, {"nadpis": "4. KONSOLIDÁTOŘI", "filtry": [], "df": vytvor_kontingencni_tabulku(df, ["Název org."], agg_full)})
-                tabulky_def.append({"nadpis": "6. HELPDESK", "filtry": [], "df": vytvor_kontingencni_tabulku(df_helpdesk, ["Název org."], agg_with_service, ma_service_fee=False)})
-                tabulky_def.append({"nadpis": "7. KLIENTI BTT", "filtry": [("Jméno referenta", "(Vše)")], "df": vytvor_kontingencni_tabulku(df_btt, ["Název org.", "Služba"], agg_full)})
+                # 4. Konsolidátoři
+                df_t4, l_t4 = priprav_data_s_osnovou(df, ["Název org."], agg_full)
+                tabulky_def.insert(3, {"nadpis": "4. KONSOLIDÁTOŘI", "filtry": [], "df": df_t4, "levels": l_t4})
+                
+                # 6. Helpdesk
+                df_t6, l_t6 = priprav_data_s_osnovou(df_helpdesk, ["Název org."], agg_with_service, ma_service_fee=False)
+                tabulky_def.append({"nadpis": "6. HELPDESK", "filtry": [], "df": df_t6, "levels": l_t6})
+                
+                # 7. Klienti BTT (Hierarchie s rozbalením)
+                df_t7, l_t7 = priprav_data_s_osnovou(df_btt, ["Název org.", "Služba"], agg_full)
+                tabulky_def.append({"nadpis": "7. KLIENTI BTT", "filtry": [("Jméno referenta", "(Vše)")], "df": df_t7, "levels": l_t7})
 
-        st.success("Data byla úspěšně zpracována.")
+        st.success("Data byla úspěšně zpracována včetně rozbalovacích struktur.")
         
-        # Zobrazení
         for t in tabulky_def:
             st.subheader(t["nadpis"])
             for f_name, f_val in t["filtry"]: st.caption(f"_{f_name}: {f_val}_")
             if not t["df"].empty: st.dataframe(t["df"], use_container_width=True)
 
-        # Export (Na 1 list)
+        # Generování Excelu s nativními Excelovými osnovami (skupinami řádků pro rozbalování)
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             wb = writer.book
@@ -141,29 +199,63 @@ if heslo == "TajneHeslo2026":
                 if t["filtry"]: r_idx += 1
                 
                 df_export = t["df"]
+                levels = t.get("levels", [])
+                
                 if not df_export.empty:
                     for c_idx, c_name in enumerate(df_export.columns):
                         ws.write(r_idx, c_idx, c_name, f_hdr)
                     r_idx += 1
                     
-                    for _, r_data in df_export.iterrows():
+                    # Zápis řádků a nastavení úrovně osnovy (collapse/expand)
+                    for i, (_, r_data) in enumerate(df_export.iterrows()):
+                        current_level = levels[i] if i < len(levels) else 0
+                        
+                        # Pokud má řádek úroveň podsestavy (2), nastavíme mu group level v Excelu
+                        row_options = {'level': 1} if current_level == 2 else {}
+                        
                         for c_idx, c_name in enumerate(df_export.columns):
                             val = r_data[c_name]
                             if pd.isna(val) or val == "":
-                                ws.write(r_idx, c_idx, "")
+                                ws.write(r_idx, c_idx, "", row_options)
                             elif "Popisky řádků" in c_name:
                                 if not str(val).startswith("   ") or "Celkový součet" in str(val):
-                                    ws.write(r_idx, c_idx, str(val), f_bold)
+                                    ws.write(r_idx, c_idx, str(val), f_bold, row_options)
                                 else:
-                                    ws.write(r_idx, c_idx, str(val))
+                                    ws.write(r_idx, c_idx, str(val), row_options)
                             elif "Poč.dokl." in c_name:
-                                ws.write_number(r_idx, c_idx, val, f_int)
+                                ws.write_number(r_idx, c_idx, val, f_int, row_options)
                             else:
-                                ws.write_number(r_idx, c_idx, val, f_num)
+                                ws.write_number(r_idx, c_idx, val, f_num, row_options)
                         r_idx += 1
                 r_idx += 3
 
+        excel_data = output.getvalue()
+        file_name_out = "Vysledky_BTT_srpen_2026.xlsx"
+
         st.divider()
-        st.download_button("📥 Stáhnout opravený výkaz", data=output.getvalue(), file_name="Vysledky_BTT_hotovo.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("📥 Stažení souboru")
+            st.download_button(
+                label="Stáhnout výkaz do PC",
+                data=excel_data,
+                file_name=file_name_out,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            
+        with col2:
+            st.subheader("📧 Odeslání přes Outlook 365")
+            prijemci = st.text_input("Příjemci (oddělené čárkou)", "email1@firma.cz, email2@firma.cz")
+            poznamka_mail = st.text_area("Volitelná zpráva v e-mailu", "Zde je měsíční přehled výsledků BTT s rozbalovacími strukturami.")
+            
+            if st.button("Odeslat report e-mailem"):
+                with st.spinner("Odesílám e-mail přes Outlook..."):
+                    success, message = odeslat_email_outlook(excel_data, file_name_out, prijemci, poznamka_mail)
+                    if success:
+                        st.success(message)
+                    else:
+                        st.error(message)
+
 elif heslo:
     st.error("Nesprávné heslo.")
