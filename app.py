@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import io
 import numpy as np
+import re
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -150,7 +151,7 @@ if heslo == "TajneHeslo2026":
         else:
             df_obchodaci = df
 
-        # Filtrování Konzolidátoři (dle vybraných firem z obrázku)
+        # Filtrování Konzolidátoři (vektorově přes str.contains, 100% kompatibilní s PyArrow/Python 3.14)
         vybrani_konzolidatori = [
             "Agentura SMART, s.r.o.",
             "Čedok a.s.",
@@ -162,9 +163,8 @@ if heslo == "TajneHeslo2026":
             "White Grant s.r.o."
         ]
         if "Název org." in df.columns:
-            podminka_konz = df["Název org."].astype(str).apply(
-                lambda x: any(x.strip().startswith(k) or k in x for k in vybrani_konzolidatori)
-            )
+            pattern_konz = '|'.join([re.escape(k) for k in vybrani_konzolidatori])
+            podminka_konz = df["Název org."].astype(str).str.contains(pattern_konz, case=False, regex=True, na=False)
             df_konzolidatori = df[podminka_konz]
             if df_konzolidatori.empty:
                 df_konzolidatori = df
