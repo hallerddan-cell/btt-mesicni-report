@@ -64,7 +64,7 @@ def priprav_data_s_osnovou(df, row_cols, agg_dict, ma_service_fee=True):
                 if ma_service_fee and "Service fee" in detail_row: zaznam_detail["Průměr z Service fee2"] = detail_row["Průměr z Service fee2"]
                 if "Provize" in detail_row: zaznam_detail["Průměr z Provize2"] = detail_row["Průměr z Provize2"]
                 vysledne_radky.append(zaznam_detail)
-                levels.append(1) # Podřízený detail (schovatelný pod nadřazený řádek)
+                levels.append(1) # Podřízený detail (rozbalovací)
 
     celkem_dict = df.agg(agg_dict).to_dict()
     celkem_row = {"Popisky řádků": "Celkový součet"}
@@ -129,6 +129,7 @@ if heslo == "TajneHeslo2026":
     if uploaded_file is not None:
         df = pd.read_excel(uploaded_file)
         
+        # Filtrování BTT
         if "Název org." in df.columns:
             df_btt = df[df["Název org."].astype(str).str.contains("BTT", case=False, na=False)]
             if df_btt.empty:
@@ -136,16 +137,39 @@ if heslo == "TajneHeslo2026":
         else:
             df_btt = df
             
+        # Filtrování Helpdesk
         if "Služba" in df.columns:
             df_helpdesk = df[df["Služba"].astype(str).str.contains("Helpdesk", case=False, na=False)]
         else:
             df_helpdesk = df
         
+        # Filtrování Obchoďáci
         obchodaci = ['Jandošová Petra', 'Matějková Ivona', 'Nekola Tomáš', 'Třebický Tomáš']
         if "Jméno referenta" in df.columns:
             df_obchodaci = df[df["Jméno referenta"].isin(obchodaci)]
         else:
             df_obchodaci = df
+
+        # Filtrování Konzolidátoři (dle vybraných firem z obrázku)
+        vybrani_konzolidatori = [
+            "Agentura SMART, s.r.o.",
+            "Čedok a.s.",
+            "Senator Meetings & Ince",
+            "Silicon Factory s.r.o.",
+            "Smartwings a.s. TVS",
+            "Smartwings Poland Sp.z",
+            "Smartwings, a.s. - VIP Sl",
+            "White Grant s.r.o."
+        ]
+        if "Název org." in df.columns:
+            podminka_konz = df["Název org."].astype(str).apply(
+                lambda x: any(x.strip().startswith(k) or k in x for k in vybrani_konzolidatori)
+            )
+            df_konzolidatori = df[podminka_konz]
+            if df_konzolidatori.empty:
+                df_konzolidatori = df
+        else:
+            df_konzolidatori = df
 
         base_agg = {"Poč.dokl.": "sum", "Celkem": "sum"}
         agg_with_provize = {**base_agg, "Provize": "sum"}
@@ -168,7 +192,7 @@ if heslo == "TajneHeslo2026":
                 tabulky_def.append({"nadpis": "5. OBCHOĎÁCI", "filtry": [], "df": df_t5, "levels": l_t5})
                 
             if "Název org." in df.columns:
-                df_t4, l_t4 = priprav_data_s_osnovou(df, ["Název org."], agg_full)
+                df_t4, l_t4 = priprav_data_s_osnovou(df_konzolidatori, ["Název org."], agg_full)
                 tabulky_def.insert(3, {"nadpis": "4. KONSOLIDÁTOŘI", "filtry": [], "df": df_t4, "levels": l_t4})
                 
                 df_t6, l_t6 = priprav_data_s_osnovou(df_helpdesk, ["Název org."], agg_with_service, ma_service_fee=False)
@@ -187,14 +211,14 @@ if heslo == "TajneHeslo2026":
             else:
                 st.info("Tabulka neobsahuje data pro zobrazení.")
 
-        # Generování Excelu s osnovou
+        # Generování Excelu
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             wb = writer.book
             ws = wb.add_worksheet('Výsledky BTT')
             writer.sheets['Výsledky BTT'] = ws
             
-            # Zapnutí viditelnosti tlačítek osnovy (+/-) v Excelu nahoru k hlavičkám skupiny
+            # Zapnutí tlačítek osnovy (+/-) v Excelu
             ws.outline_settings(visible=True, symbols_below=False)
             
             f_bold = wb.add_format({'bold': True})
