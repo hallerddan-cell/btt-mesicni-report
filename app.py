@@ -151,6 +151,12 @@ else:
 if df is not None:
     df = unifikuj_sloupce(df)
 
+    # Definice klíčových sloupců hned na začátku
+    col_datum = "Datum vytvoření"
+    col_zakazka = "Zakázka"
+    col_nakklady = "Náklady"
+    col_referent = "BD"
+
     st.divider()
     st.subheader("1. Nastavení vyhodnocovaného období")
     
@@ -163,12 +169,6 @@ if df is not None:
         vybrany_rok = st.number_input("Rok", min_value=2020, max_value=2030, value=prev_month_date.year)
     with col2:
         vybrany_mesic = st.selectbox("Měsíc", options=list(range(1, 13)), index=prev_month_date.month - 1, format_func=lambda m: f"{m}. měsíc")
-
-    # Definice klíčových sloupců
-    col_datum = "Datum vytvoření"
-    col_zakazka = "Zakázka"
-    col_naklady = "Náklady"
-    col_referent = "BD"
 
     potrebne = [col_datum, col_zakazka, col_nakklady, col_referent]
     chybi_cols = [c for c in potrebne if c not in df.columns]
@@ -197,10 +197,10 @@ if df is not None:
 
         # 1. Kontrola chybějících nákladů (s výjimkou pro HELPDESK)
         mask_chybi_naklad = (
-            df_ocistene[col_naklady].isna() | 
-            (df_ocistene[col_naklady].astype(str).str.strip() == "") | 
-            (df_ocistene[col_naklady].astype(str).str.strip() == "0") |
-            (df_ocistene[col_naklady] == 0)
+            df_ocistene[col_nakklady].isna() | 
+            (df_ocistene[col_nakklady].astype(str).str.strip() == "") | 
+            (df_ocistene[col_nakklady].astype(str).str.strip() == "0") |
+            (df_ocistene[col_nakklady] == 0)
         )
 
         if col_sluzba:
@@ -306,22 +306,4 @@ if df is not None:
                         mozne_sloupce = [col_zakazka, "Název poskytovatele", "Služba", "Route 1", "Cestující", "Začátek cesty", "Konec cesty"]
                         dostupne_sloupce_email = [c for c in mozne_sloupce if c in zakazky.columns]
 
-                        tab_html = zakazky[dostupne_sloupce_email].to_html(index=False)
-                        msg_body = f"<h2>Upozornění: Chybějící údaje / náklady za {vybrany_mesic}/{vybrany_rok}</h2>"
-                        msg_body += f"<p>Dobrý den, {referent}, u následujících zakázek chybí náklady nebo hodnota v Route 1:</p>{tab_html}"
-
-                        msg = MIMEMultipart()
-                        msg['From'] = sender
-                        msg['To'] = prijemce
-                        msg['Subject'] = f"Upozornění: Chybějící položky za {vybrany_mesic}/{vybrany_rok}"
-                        msg.attach(MIMEText(msg_body, 'html', 'utf-8'))
-
-                        try:
-                            s = smtplib.SMTP(server_name, 587)
-                            s.starttls()
-                            s.login(sender, pwd)
-                            s.sendmail(sender, [prijemce], msg.as_string())
-                            s.quit()
-                            st.success(f"E-mail doručen na: {prijemce} ({referent})")
-                        except Exception as ex:
-                            st.error(f"Chyba při odesílání pro {referent}: {ex}")
+                        tab_html = zakaz
