@@ -164,6 +164,7 @@ if df is not None:
     with col2:
         vybrany_mesic = st.selectbox("Měsíc", options=list(range(1, 13)), index=prev_month_date.month - 1, format_func=lambda m: f"{m}. měsíc")
 
+    # Definice klíčových sloupců
     col_datum = "Datum vytvoření"
     col_zakazka = "Zakázka"
     col_naklady = "Náklady"
@@ -194,20 +195,19 @@ if df is not None:
 
         col_sluzba = "Služba" if "Služba" in df_ocistene.columns else None
 
-        # 1. Původní kontrola chybějících nákladů
+        # 1. Kontrola chybějících nákladů (s výjimkou pro HELPDESK)
         mask_chybi_naklad = (
-            df_ocistene[col_nakklady].isna() | 
-            (df_ocistene[col_nakklady].astype(str).str.strip() == "") | 
-            (df_ocistene[col_nakklady].astype(str).str.strip() == "0") |
-            (df_ocistene[col_nakklady] == 0)
+            df_ocistene[col_naklady].isna() | 
+            (df_ocistene[col_naklady].astype(str).str.strip() == "") | 
+            (df_ocistene[col_naklady].astype(str).str.strip() == "0") |
+            (df_ocistene[col_naklady] == 0)
         )
 
-        # Výjimka pro HELPDESK (náklady se ignorují)
         if col_sluzba:
             is_helpdesk = df_ocistene[col_sluzba].astype(str).str.strip().str.upper() == "HELPDESK"
             mask_chybi_naklad = mask_chybi_naklad & (~is_helpdesk)
 
-        # 2. Nová kontrola pro Route 1 u specifických služeb
+        # 2. Kontrola pro Route 1 u specifických služeb
         mask_chybi_route = pd.Series(False, index=df_ocistene.index)
         if col_sluzba and "Route 1" in df_ocistene.columns:
             sluzby_pro_route = ["LETNBSPSLUZBA", "LETSLUZBA", "LETZMENA", "LETEMD"]
@@ -221,7 +221,7 @@ if df is not None:
             )
             mask_chybi_route = je_vybrana_sluzba & route1_chybi
 
-        # Celková podmínka chyby (buď chybí náklad, nebo chybí Route 1 u daných služeb)
+        # Celková podmínka chyby
         mask_chybi = mask_chybi_naklad | mask_chybi_route
 
         df_ocistene["Stav nákladů"] = np.where(mask_chybi, "❌ Chybí náklad / Route 1", "✅ V pořádku")
