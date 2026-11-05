@@ -151,7 +151,7 @@ else:
 if df is not None:
     df = unifikuj_sloupce(df)
 
-    # Definice klíčových sloupců hned na začátku
+    # Definice klíčových sloupců
     col_datum = "Datum vytvoření"
     col_zakazka = "Zakázka"
     col_nakklady = "Náklady"
@@ -195,7 +195,13 @@ if df is not None:
 
         col_sluzba = "Služba" if "Služba" in df_ocistene.columns else None
 
-        # 1. Kontrola chybějících nákladů (s výjimkou pro HELPDESK)
+        # Pomocná maska: pokud je sloupec Celkem roven 0, ignorujeme chybu
+        is_celkem_nula = pd.Series(False, index=df_ocistene.index)
+        if "Celkem" in df_ocistene.columns:
+            celkem_val = pd.to_numeric(df_ocistene["Celkem"], errors='coerce').fillna(0)
+            is_celkem_nula = (celkem_val == 0)
+
+        # 1. Kontrola chybějících nákladů (s výjimkou pro HELPDESK a Celkem == 0)
         mask_chybi_naklad = (
             df_ocistene[col_nakklady].isna() | 
             (df_ocistene[col_nakklady].astype(str).str.strip() == "") | 
@@ -207,7 +213,10 @@ if df is not None:
             is_helpdesk = df_ocistene[col_sluzba].astype(str).str.strip().str.upper() == "HELPDESK"
             mask_chybi_naklad = mask_chybi_naklad & (~is_helpdesk)
 
-        # 2. Kontrola pro Route 1 u specifických služeb
+        # Ignorujeme, pokud je Celkem == 0
+        mask_chybi_naklad = mask_chybi_naklad & (~is_celkem_nula)
+
+        # 2. Kontrola pro Route 1 u specifických služeb (s výjimkou pro Celkem == 0)
         mask_chybi_route = pd.Series(False, index=df_ocistene.index)
         if col_sluzba and "Route 1" in df_ocistene.columns:
             sluzby_pro_route = ["LETNBSPSLUZBA", "LETSLUZBA", "LETZMENA", "LETEMD"]
@@ -219,7 +228,7 @@ if df is not None:
                 (route1_val.astype(str).str.strip() == "") | 
                 (route1_val.astype(str).str.strip().str.lower() == "nan")
             )
-            mask_chybi_route = je_vybrana_sluzba & route1_chybi
+            mask_chybi_route = je_vybrana_sluzba & route1_chybi & (~is_celkem_nula)
 
         # Celková podmínka chyby
         mask_chybi = mask_chybi_naklad | mask_chybi_route
@@ -306,4 +315,22 @@ if df is not None:
                         mozne_sloupce = [col_zakazka, "Název poskytovatele", "Služba", "Route 1", "Cestující", "Začátek cesty", "Konec cesty"]
                         dostupne_sloupce_email = [c for c in mozne_sloupce if c in zakazky.columns]
 
-                        tab_html = zakaz
+                        tab_html = zakazky[dostupne_sloupce_email].to_html(index=False)
+                        msg_body = f"<h2>Upozornění: Chybějící údaje / náklady za {vybrany_mesic}/{vybrany_rok}</h2>"
+                        msg_body += f"<p>Dobrý den, {referent}, u následujících zakázek chybí náklady nebo hodnota v Route 1:</p>{tab_html}"
+
+                        msg = MIMEMultipart()
+                        msg['From'] = sender
+                        msg['To'] = prijemce
+                        msg['Subject'] = f"Upozornění: Chybějící položky za {vybrany_mesic}/{vybrany_rok}"
+                        msg.attach(MIMEText(msg_body, 'html', 'utf-8'))
+
+                        try:
+                            s = smtplib.SMTP(server_name, 587)
+                            s.starttls()
+                            s.login(sender, pwd)
+                            s.sendmail(sender, [prijemce], msg.as_string())
+                            s.quit()
+                            st.success(f"E-mail doručen na: {prijemce} ({referent})")
+                        except Exception as ex:
+                            st.error(f"Chyba při odesílání pro {referent}: {ex}")
